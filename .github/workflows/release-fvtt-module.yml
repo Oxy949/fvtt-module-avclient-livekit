@@ -1,15 +1,7 @@
 on:
-  # Only run this workflow when a release is published.
-  # To modify this workflow when other events occur, see:
-  #   - https://docs.github.com/en/actions/using-workflows/triggering-a-workflow
-  #   - https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows
-  #   - https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#on
-  #
-  # Note that some steps may depend on context variables that are only
-  # available for release events, so if you add other events, you may need to
-  # alter other parts of this workflow.
-  release:
-    types: [published]
+  push:
+    branches:
+      - main
 
 name: Release FoundryVTT Module
 
@@ -36,11 +28,23 @@ jobs:
     name: Release FoundryVTT Module
     runs-on: ubuntu-latest
     needs: check_version
+    if: ${{ needs.check_version.outputs.module_current_version != needs.check_version.outputs.module_previous_version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
+      - name: Create tag changelog
+        id: changelog
+        run: |
+          CHANGELOG=$(git log --reverse --pretty=oneline --abbrev-commit ${{ needs.check_version.outputs.module_previous_version }}..HEAD)
+          # Support for multiline, see
+          # https://github.com/actions/create-release/pull/11#issuecomment-640071918
+          CHANGELOG="${CHANGELOG//'%'/'%25'}"
+          CHANGELOG="${CHANGELOG//$'\n'/'%0A'}"
+          CHANGELOG="${CHANGELOG//$'\r'/'%0D'}"
+          echo "Got changelog: $CHANGELOG"
+          echo "::set-output name=changelog::$CHANGELOG"
       - name: Update download URL
         id: update_module_download_url
         uses: microsoft/variable-substitution@v1
@@ -69,3 +73,23 @@ jobs:
           body: ${{ steps.changelog.outputs.changelog }}
           draft: false
           prerelease: true
+      - name: Upload module zip
+        id: upload-module-zip
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./${{ github.event.repository.name }}.zip
+          asset_name: ${{ github.event.repository.name }}.zip
+          asset_content_type: application/zip
+      - name: Upload module json
+        id: upload-module-json
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./module.json
+          asset_name: module.json
+          asset_content_type: application/json
